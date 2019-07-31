@@ -209,7 +209,7 @@ class ServerList(defaultdict):
         # Get server dictionary
         try:
             server = self[discordID][idx-1]
-        except KeyError:
+        except (KeyError, IndexError):
             return [f'Couldn\'t find {idx} in the server list', '']
 
         # init values
