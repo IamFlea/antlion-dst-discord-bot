@@ -38,8 +38,9 @@ def getServerListSteam(ip):
     except (KeyError, IndexError):
         return []
     for s in servers:
+        #print(s)
         try:
-            if s['gamedir'] == "DoNotStarveTogether":
+            if s['appid'] == 322330 and s['gamedir'] != "slave":
                 ip, port = s['addr'].split(':')
                 yield (ip, int(port), int(s['gameport']))
         except (KeyError, IndexError, ValueError):
@@ -63,5 +64,7 @@ if __name__ == '__main__':
     #import print
     DFT = '94.76.229.42'
     DST_EU = '46.101.212.23'
-    x = getServerListSteam(DFT) 
-    print(list(x))
+    x = getServerListSteam(DFT)
+    t = list(x)
+    print("---") 
+    print(t)
