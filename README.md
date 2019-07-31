@@ -1,11 +1,14 @@
 Ladies and gantleman, 
 
-I present you Antlion bot for Discord servers!
+I present you 
+
+# Antlion bot for Discord servers!
+
 It is not a boss. It is a bot. 
 
 Player just type `.dst` and the bot prints down online players. See: 
 
-https://i.imgur.com/pvrRqwu.png
+![Discord bot in the action](https://i.imgur.com/pvrRqwu.png)
 
 
 ## Setting up Discord
