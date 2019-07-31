@@ -89,10 +89,13 @@ def getLobbies():
 @return list of lobbies (servers)
 """
 def getServerListKlei():
-    # Get time of the last modification of `KLEI_SERVER_LIST_FILENAME`
-    t = op.getmtime(KLEI_SERVER_LIST_FILENAME)
-    # If the file is older than 10 minutes, we will update it
-    needUpdate = dt.datetime.fromtimestamp(t) < dt.datetime.now() - dt.timedelta(minutes=60)
+    try:
+        # Get time of the last modification of `KLEI_SERVER_LIST_FILENAME`
+        t = op.getmtime(KLEI_SERVER_LIST_FILENAME)
+        # If the file is older than 10 minutes, we will update it
+        needUpdate = dt.datetime.fromtimestamp(t) < dt.datetime.now() - dt.timedelta(minutes=60)
+    except FileNotFoundError:
+        needUpdate = True
     if needUpdate:
         # Load new lobbies
         lobbies = getLobbies()
