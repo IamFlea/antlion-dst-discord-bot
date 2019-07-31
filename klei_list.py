@@ -119,7 +119,8 @@ def getServerRowID(ip, port):
     for lobby in getServerListKlei(): 
         if lobby['__addr'] == ip and int(lobby['port']) == port:
             #print(server)
-            return lobby['__rowId']
+            return lobby['__rowId'], lobby['name']
+    return None, None
 
 
 

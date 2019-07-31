@@ -64,43 +64,27 @@ class ServerList(defaultdict):
         except socket.error:
             return '*Smeg*, IP format is wrong'      
 
-        # Get server list
-        servers = getServerListSteam(ip)
 
-        # User defined port
-        if port is not None:
-            port = int(port)
-            # Then we find the server with that port
-            needle = []
-            for server in servers:
-                if int(server[1]['port']) == port:
-                    needle = [server]
-                    break
-            servers = needle
-
-        # Didnt find IP in the server list
-
-        if not servers:
-            return 'Couldn\'t find IP in steam server list.'
 
         # Resulting string and save format
         response = ''
         save_flag = False
 
         # Iterate through the servers 
-        for server in servers:
+        for server in getServerListSteam(ip):
+            # We are finding for specific port
+            if port is not None and int(port) != server[2]:
+                continue
             # Save IP, port (for steam) and klei ID 
-            rowID = getServerRowID(server[0][0], int(server[1]['port']))
-            new_server = {'ip': server[0][0],
-                          'port': server[0][1], # steam port
+            rowID, servername = getServerRowID(server[0], int(server[2]))
+            new_server = {'ip': server[0],
+                          'port': server[1], # steam port
                           'kleiID_row' : rowID}
-            # Get servername 
-            servername = server[1]['name']
 
             # Check if the server is in the list
             if self.checkServer(discordID, new_server):
                 # then we do not add it and print some message
-                response += f'**Smeg**, `{server[0][0]}:{server[0][1]}` is already in the server list! ({servername})\n'
+                response += f'**Smeg**, `{server[0]}:{server[1]}` is already in the server list!\n'
                 continue
             # Add server into the list
             self[discordID] += [new_server]
@@ -109,9 +93,12 @@ class ServerList(defaultdict):
             # Prints the message
             idx = str(len(self[discordID]))
             if rowID:
-                response += f'Added `{server[0][0]}:{server[0][1]}` to sever list with number `{idx}` ({servername})  Klei row id = {rowID}\n'
+                response += f'Added `{server[0]}:{server[1]}` to sever list with number `{idx}` ({servername})  Klei row id = {rowID}\n'
             else:
-                response += f'Added `{server[0][0]}:{server[0][1]}` to sever list with number `{idx}` ({servername})  **Klei row id was not found!**\n'
+                response += f'Added `{server[0]}:{server[1]}` to sever list with number `{idx}`  **Klei row id was not found!**\n'
+
+        if response == '':
+            return f'Couldn\'t find IP {ip} in steam server list.'
 
         # Some kind of update
         if save_flag:
@@ -310,12 +297,12 @@ class ServerList(defaultdict):
 # debugging porposes
 if __name__ == '__main__':
     DFT = '94.76.229.42'
-    DID = 340619088399433730
+    DID = 42
     x = ServerList()
-    #print(x.clear(DID))
-    #print(x.add(DID, DFT))
+    print(x.clear(DID))
+    print(x.add(DID, DFT))
 
-    print(x.getInfo(DID, admin=True))
+    #print(x.getInfo(DID, admin=True))
 
 
 

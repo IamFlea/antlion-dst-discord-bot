@@ -9,30 +9,42 @@ By: github.com/iamflea
 Licence: who cares July 2019
 """
 import socket
+import http.client
+import json 
 from steam import game_servers as gs
+
 
 from config import *
 
-QUERY_STEAM_APP = r'\appid\322330'
+#QUERY_STEAM_APP = r'\appid\322330'
 
 ''' Get all servers having `ip` '''
+# https://94.76.229.42
 def getServerListSteam(ip):
-    #print("getServerListSteam()")
-    result = []
+    # Connect
+    conn = http.client.HTTPSConnection('api.steampowered.com', 443)
+    conn.request("GET", f'/ISteamApps/GetServersAtAddress/v1/?addr={ip}')
+    res = conn.getresponse()
+    # Check if everything is all right
+    if res.status != 200: 
+        return []
+    # Get data and close connection
+    data = res.read()
+    conn.close()
+    # Get json data
+    data = json.loads(data)
     try:
-        for address in gs.query_master(QUERY_STEAM_APP, STEAM_SERVERLIST_TIMEOUT_MS):
-            if address[0] == ip:
-                server = gs.a2s_info(address)
-                if server['visibility'] == 0:
-                    result += [(address, server)]
-    except socket.timeout as e:
-        #print("Socket timeout")
-        pass
-    # Sort the result by server name.
-    if result:
-        result.sort(key = lambda item: item[1]['name'])
-        result = result[:MAX_SERVER_LENGTH]
-    return result
+        servers = data['response']['servers']
+    except (KeyError, IndexError):
+        return []
+    for s in servers:
+        try:
+            if s['gamedir'] == "DoNotStarveTogether":
+                ip, port = s['addr'].split(':')
+                yield (ip, int(port), int(s['gameport']))
+        except (KeyError, IndexError, ValueError):
+            continue
+
 
 """ Get steam info 
 
@@ -52,3 +64,4 @@ if __name__ == '__main__':
     DFT = '94.76.229.42'
     DST_EU = '46.101.212.23'
     x = getServerListSteam(DFT) 
+    print(list(x))
