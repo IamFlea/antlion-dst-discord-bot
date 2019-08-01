@@ -26,10 +26,13 @@ class ServerList(defaultdict):
     """ Load saved data from `JSON_FILENAME` """
     def load(self):
         self.clear(list)
-        with open(JSON_FILENAME, 'r') as fp:
-            discordServers = json.load(fp)
-            for discordId in discordServers:
-                self[int(discordId)] = discordServers[discordId]
+        try:
+            with open(JSON_FILENAME, 'r') as fp:
+                discordServers = json.load(fp)
+                for discordId in discordServers:
+                    self[int(discordId)] = discordServers[discordId]
+        except FileNotFoundError:
+            pass
     """ Save data into `JSON_FILENAME` """
     def save(self):
         with open(JSON_FILENAME, 'w') as fp:
@@ -112,9 +115,6 @@ class ServerList(defaultdict):
         else: 
             response += 'Meow! Nothing updated.'
         return response
-    
-
-    
 
     """ Check if `discordId` is not in the main dictionary `self`
 
@@ -153,22 +153,25 @@ class ServerList(defaultdict):
         # We read it from the file.. 
         # It may happen that we do updates in dictionary. 
         # HOwever the file is not updated 
-        with open(JSON_FILENAME, 'r') as fp:
-            jsonServers = json.load(fp)
-            if str(discordId) not in jsonServers:
-                return 'Server list is empty.'
-            result = '```\n'
-            result += '| ID |                      Klei Row ID | Master Server IP | DSTPort | SteamPort |  Slave Server IP | DSTPort | SteamPort |\n'
-            #          |                                         1234123412341234    123456 |    123456 | 1234123412341234 |  123456 |    123456 |
-            for idx, server in enumerate(jsonServers[str(discordId)]):
-                result += f"| {str(idx+1).rjust(2)} | {server['rowId']} | "
-                #{str(list(map(tuple, server['servers'])))}
-                for ip, gamePort, steamPort in server['servers']:
-                    ip = ip.rjust(16, ' ')
-                    gamePort = str(gamePort).rjust(7, ' ')
-                    steamPort = str(steamPort).rjust(9, ' ')
-                    result += f'{ip} | {gamePort} | {steamPort} | '
-                result += "\n"
+        try:
+            with open(JSON_FILENAME, 'r') as fp:
+                jsonServers = json.load(fp)
+                if str(discordId) not in jsonServers:
+                    return 'Server list is empty.'
+                result = '```\n'
+                result += '| ID |                      Klei Row ID | Master Server IP | DSTPort | SteamPort |  Slave Server IP | DSTPort | SteamPort |\n'
+                #          |                                         1234123412341234    123456 |    123456 | 1234123412341234 |  123456 |    123456 |
+                for idx, server in enumerate(jsonServers[str(discordId)]):
+                    result += f"| {str(idx+1).rjust(2)} | {server['rowId']} | "
+                    #{str(list(map(tuple, server['servers'])))}
+                    for ip, gamePort, steamPort in server['servers']:
+                        ip = ip.rjust(16, ' ')
+                        gamePort = str(gamePort).rjust(7, ' ')
+                        steamPort = str(steamPort).rjust(9, ' ')
+                        result += f'{ip} | {gamePort} | {steamPort} | '
+                    result += "\n"
+        except FileNotFoundError:
+            return 'Server list is empty.'
 
         result += '``` '
         return result
