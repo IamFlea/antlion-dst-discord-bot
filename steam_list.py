@@ -40,7 +40,7 @@ def getServerListSteam(ip):
     for s in servers:
         #print(s)
         try:
-            if s['appid'] == 322330 and s['gamedir'] != "slave":
+            if s['appid'] == 322330:
                 ip, port = s['addr'].split(':')
                 yield (ip, int(port), int(s['gameport']))
         except (KeyError, IndexError, ValueError):

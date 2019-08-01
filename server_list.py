@@ -1,6 +1,7 @@
 import socket
 import json
 from collections import defaultdict
+from itertools import zip_longest
 
 from config import *
 from steam_list import *
@@ -27,33 +28,34 @@ class ServerList(defaultdict):
         self.clear(list)
         with open(JSON_FILENAME, 'r') as fp:
             discordServers = json.load(fp)
-            for discordID in discordServers:
-                self[int(discordID)] = discordServers[discordID]
+            for discordId in discordServers:
+                self[int(discordId)] = discordServers[discordId]
     """ Save data into `JSON_FILENAME` """
     def save(self):
         with open(JSON_FILENAME, 'w') as fp:
             json.dump(self, fp)
 
-    """ Removes the server list of `discordID` 
+    """ Removes the server list of `discordId` 
     
     @return string  A message for the bot
     """
-    def clear(self, discordID):
+    def clear(self, discordId):
         try:
-            del self[discordID]
+            del self[discordId]
             self.save()
             return f'Cleared server list for this discord.'
         except KeyError:
             return '*Smeg*, server list seems to be empty.'
 
+
     """ Adds into the array an IP with specific port 
     
-    @param discordID  int   
+    @param discordId  int   
     @param ip  string
     @return string  A message for the bot
     """
-    def add(self, discordID, ip, port=None):
-        saved_servers = self[discordID]
+    def add(self, discordId, ip, port=None):
+        saved_servers = self[discordId]
         # Checks the maximum number of servers
         if len(saved_servers) >= MAX_SERVER_LENGTH:
             return f'*Smeg*, you already have {MAX_SERVER_LENGTH} servers in your list!'
@@ -64,128 +66,133 @@ class ServerList(defaultdict):
         except socket.error:
             return '*Smeg*, IP format is wrong'      
 
+        # Get server ports from Steam API having this IP 
+        steamServers = list(getServerListSteam(ip))
+        # Get server info from Klei API 
+        kleiServers = list(filter(lambda s: s is not None, [getServerRowID(server[0], server[2]) for server in steamServers]))
 
+        # I am sorry for nested def -.- 
+        # I would use some oneliner, however it wouldn't be readable as this
+        def findSteamPort(ip, port, serverList=steamServers):
+            for server in serverList:
+                if ip == server[0] and port == server[2]: # remove ip? 
+                    return int(server[1])
+        # Function that creates dictionary from IP, port and adds steamport
+        getServer = lambda ip, port: (ip, port, findSteamPort(ip, port))
 
-        # Resulting string and save format
         response = ''
         save_flag = False
-
-        # Iterate through the servers 
-        for server in getServerListSteam(ip):
-            # We are finding for specific port
-            if port is not None and int(port) != server[2]:
+        for server in kleiServers:
+            # Skip unwanted servers
+            if port is not None and int(port) != server['port']:
                 continue
-            # Save IP, port (for steam) and klei ID 
-            rowID, servername = getServerRowID(server[0], int(server[2]))
-            new_server = {'ip': server[0],
-                          'port': server[1], # steam port
-                          'kleiID_row' : rowID}
 
-            # Check if the server is in the list
-            if self.checkServer(discordID, new_server):
-                # then we do not add it and print some message
-                response += f'**Smeg**, `{server[0]}:{server[1]}` is already in the server list!\n'
+            rowId = server['__rowId']
+            if self.isInList(discordId, rowId):
+                response += f"**Smeg!** {server['name']} is already in the server list with address `{server['__addr']}:{server['port']}`, `{rowId}`!\n"
                 continue
+            # Master server is first
+            servers = [getServer(server['__addr'], server['port'])]
+            # Slaves are appended
+            slaves = server['slaves']
+            slaves = [(slaves[key]['__addr'], int(slaves[key]['port'])) for key in slaves]
+            servers += list(map(lambda x: getServer(*x), slaves))
             # Add server into the list
-            self[discordID] += [new_server]
-            # Set the flag, so we save 
+            self[discordId] += [{'rowId': rowId, 'servers': servers}]
             save_flag = True
-            # Prints the message
-            idx = str(len(self[discordID]))
-            if rowID:
-                response += f'Added `{server[0]}:{server[1]}` to sever list with number `{idx}` ({servername})  Klei row id = {rowID}\n'
-            else:
-                response += f'Added `{server[0]}:{server[1]}` to sever list with number `{idx}`  **Klei row id was not found!**\n'
+            response += f"Added *{server['name']}* `{rowId}` to sever list with number **{len(self[discordId])}**. `{str(servers)}`\n"
 
         if response == '':
-            return f'Couldn\'t find IP {ip} in steam server list.'
+            return f'Couldn\'t find IP {ip} in the Klei or Steam server list.'
 
-        # Some kind of update
         if save_flag:
             self.save()
             # Two threads one file? :o Inform admins to check server list
-            response += 'This bot is *smeghead*. Please check the serverlist by typing command `.dst server`'
+            response += 'This bot is *smeghead*. Please check the serverlist by typing command `.dst server` in this channel'
         else: 
             response += 'Meow! Nothing updated.'
-        return response;
+        return response
     
 
-    """ Check if `discordID` is not in the main dictionary `self`
+    
+
+    """ Check if `discordId` is not in the main dictionary `self`
 
     @param disocrdID  int
     @return boolean  
     """
-    def notExists(self, discordID):
-        return discordID not in self or len(self[discordID]) == 0
+    def notExists(self, discordId):
+        return discordId not in self or len(self[discordId]) == 0
 
-    """ Check if `new_server` is in the list `self[discordID]` 
+    """ Check if `rowId` is in the list `self[discordId]` 
 
-    @param discordID  int
-    @param new_server  dictionary
+    @param discordId  int
+    @param rowId   string
     @return boolean
     """
-    def checkServer(self, discordID, new_server):
-        # Checks if `self[discordID]` exists
-        if self.notExists(discordID):
+    def isInList(self, discordId, rowId):
+        # Checks if `self[discordId]` exists
+        if self.notExists(discordId):
             return False
 
-        # Compare Klei ID rows. 
-        # I suppose they should be unique
-        if new_server['kleiID_row']:
-            for dictionary in self[discordID]:
-                if dictionary['kleiID_row'] == new_server['kleiID_row']:
-                    return True
-        else:
-            # We didn't get `kleiID_row`
-            # So we need to check ip and port
-            for dictionary in self[discordID]:
-                ip_equal = dictionary['ip'] == new_server['ip']
-                port_equal = dictionary['port'] == new_server['port']
-                if ip_equal and port_equal:
-                    return True
-        # We didn't find `new_server` in the `self[discordID]`
-        return False
+        for dictionary in self[discordId]:
+            # Found the needle
+            if dictionary['rowId'] == rowId:
+                return True
+        return False 
 
-    """ Returns server list of specific `discordID`. 
+    """ Returns server list of specific `discordId`. 
 
     Return format: `{idx} > {ip}:{steam_port}  {klei_id_row}`
 
-    @param discordID  int
+    @param discordId  int
     @return string
     """
-    def serverList(self, discordID):
+    def serverList(self, discordId):
         result = ""
         # We read it from the file.. 
         # It may happen that we do updates in dictionary. 
         # HOwever the file is not updated 
         with open(JSON_FILENAME, 'r') as fp:
             jsonServers = json.load(fp)
-            if str(discordID) not in jsonServers:
+            if str(discordId) not in jsonServers:
                 return 'Server list is empty.'
-            result = '```'
-            for idx, server in enumerate(jsonServers[str(discordID)]):
-                result += f"{str(idx).rjust(2)} >  {server['ip']}:{server['port']}  Klei ID row: {server['kleiID_row']}\n"
-        result += '``` *The ports are for Steam API. They are different than game ports!*'
+            result = '```\n'
+            result += '| ID |                      Klei Row ID | Master Server IP | DSTPort | SteamPort |  Slave Server IP | DSTPort | SteamPort |\n'
+            #          |                                         1234123412341234    123456 |    123456 | 1234123412341234 |  123456 |    123456 |
+            for idx, server in enumerate(jsonServers[str(discordId)]):
+                result += f"| {str(idx+1).rjust(2)} | {server['rowId']} | "
+                #{str(list(map(tuple, server['servers'])))}
+                for ip, gamePort, steamPort in server['servers']:
+                    ip = ip.rjust(16, ' ')
+                    gamePort = str(gamePort).rjust(7, ' ')
+                    steamPort = str(steamPort).rjust(9, ' ')
+                    result += f'{ip} | {gamePort} | {steamPort} | '
+                result += "\n"
+
+        result += '``` '
         return result
 
     
 
-    """ Get information from single server which is determined by discordID and idx.
+    """ Get information from single server which is determined by discordId and idx.
 
     Note that users don't know that array starts from 0! 
     
-    @param discordID int
+    @param discordId int
     @param idx int        Indexing starts from 1 
     @return tuple (`response`, `warning`)  where `response` and `warning` are strings
     """
-    def getInfoSingleServer(self, discordID, idx, admin=False):
+    def getInfoSingleServer(self, discordId, idx, admin=False):
         # Lazy function 
 
         """ Returns `player` from `kleiPlayers` which has name `playerName`
+
+        Be glad python doesn't have `goto` statement
+
         @param playerName string 
         @param kleiPlayers list of player dictionaries 
         """
-        #print("Getting fun")
         def findInPlayers(playerName, kleiPlayers):
             for player in kleiPlayers:
                 if player['name'] == playerName:
@@ -195,17 +202,27 @@ class ServerList(defaultdict):
 
         # Get server dictionary
         try:
-            server = self[discordID][idx-1]
+            server = self[discordId][idx-1]
         except (KeyError, IndexError):
             return [f'Couldn\'t find {idx} in the server list', '']
 
+        #print(server)
         # init values
         dSteam = {}
         dKlei = {}
         try:
             # Get steam info and klei info
-            dSteam = getServerInfoSteam(server['ip'], server['port'])
-            dKlei = getServerInfoKlei(server['kleiID_row'])
+            dSteam = getServerInfoSteam(server['servers'][0][0], server['servers'][0][2])
+            for player in dSteam['players']:
+                player['cave'] = False
+            # Merge players and find out who is in the caves
+            for slave in server['servers'][1:]:
+                for player in getServerInfoSteam(slave[0], slave[2])['players']:
+                    player['cave'] = True
+                    dSteam['players'] += [player]
+
+
+            dKlei = getServerInfoKlei(server['rowId'])
         except socket.error:
             # Fix dynamic IP address problem
             # Check if we didn't get steam info
@@ -219,7 +236,7 @@ class ServerList(defaultdict):
                     self.load() 
                     # Update IP address. 
                     # Might be dynamic or changed by ISP
-                    self[discordID][idx-1]['ip'] = dKlei['__addr']
+                    self[discordId][idx-1]['ip'] = dKlei['__addr']
                     # Save changes
                     self.save()
                 except (socket.error, KeyError):
@@ -257,24 +274,28 @@ class ServerList(defaultdict):
             response += f"`{kleiPlayer['steamLink']}` " if admin and kleiPlayer['steamLink'] else ''
             response += f"{icon} `{name}ᅚ{score} "
             if player['score'] == 1:
-                response += f"day.`\n"
+                response += f"day.`"
             else:
-                response += f"days`\n"
-        warning = None
+                response += f"days`"
+            if player['cave']:
+                response += '<:minerhat:606489390457421855>' 
+            response += "\n"
+        #response = response + response + response + response +response + response + response + response +response + response + response + response +response + response + response + response +response + response + response + response 
+        #warning = ''
         # Get version
-        if CHECK_VERSIONS and int(dSteam['info']['version']) not in self.versions:
-            warning = f"[Server {idx} with name `{dSteam['info']['name']}` is running an older version of DST!] Version {dSteam['info']['version']} is not {self.versions_str}.\n"
+        #if CHECK_VERSIONS and int(dSteam['info']['version']) not in self.versions:
+        #    warning = f"[Server {idx} with name `{dSteam['info']['name']}` is running an older version of DST!] Version {dSteam['info']['version']} is not {self.versions_str}.\n"
         
-        return response, warning
+        return response, ''
 
     """ 
-    @param discordID int
+    @param discordId int
     @param idx int        Indexing starts from 1 
     @param admin bool     Shoul print admin stuff?
     @return `list` of tuples (`response`, `warning`)  where `response` and `warning` are strings
     """
-    def getInfo(self, discordID, id=None, admin=False):
-        if self.notExists(discordID):
+    def getInfo(self, discordId, id=None, admin=False):
+        if self.notExists(discordId):
             return 'This discord doesnt have binded any servers!'
         # Save versions
         if CHECK_VERSIONS:
@@ -285,10 +306,96 @@ class ServerList(defaultdict):
 
         if id is None:
             # Iterate through the list
-            return [self.getInfoSingleServer(discordID, id, admin) for id in range(1, len(self[discordID]) + 1)]
+            result = [self.getInfoSingleServer(discordId, id, admin) for id in range(1, len(self[discordId]) + 1)]
         else:
             # `id` is set
-            return [self.getInfoSingleServer(discordID, id, admin)]
+            result = [self.getInfoSingleServer(discordId, id, admin)]
+        # beep boop
+        _text = ''
+        _warning = ''
+        for t, w in result: 
+            if t[-1] != '\n':
+                t += '\n'
+            _text += t
+            if w:
+                if w[-1] != '\n':
+                    w += '\n'
+                _warning += w
+
+        return list(zip_longest(self.strDecompose(_text), self.strDecompose(_warning), fillvalue=""))
+
+
+
+    
+
+    """ Decompose long string into a list of strings ended with new line character `\n` or end of line `\x00`
+
+    Rises an MemoryError if any line is longer than horse's penis.
+    """
+    def strDecompose(self, string):
+
+        #string = "`.dst info 2` - **Don't Fight Together 2** Day N/A\nTotal players: 20/20\n<:minerhat:606489390457421855>  `       Zero III      ᅚ11 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Zero III      ᅚ11 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Ewaly ≡       ᅚ11 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Numbskull     ᅚ 6 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       NukePigg      ᅚ 9 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Shinra        ᅚ 9 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       kiba23x       ᅚ 9 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       TinObama      ᅚ 3 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Publisher 2016ᅚ 5 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       WHITENIGGA    ᅚ 5 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Kova          ᅚ 1 day.`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Zero III      ᅚ11 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Zero III      ᅚ11 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Ewaly ≡       ᅚ11 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Numbskull     ᅚ 6 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       NukePigg      ᅚ 9 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Shinra        ᅚ 9 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       kiba23x       ᅚ 9 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       TinObama      ᅚ 3 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Publisher 2016ᅚ 5 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       WHITENIGGA    ᅚ 5 days`<:minerhat:606489390457421855>\n<:minerhat:606489390457421855>  `       Kova          ᅚ 1 day.`<:minerhat:606489390457421855>"
+        # One long line => error
+        #string = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        # `\n` is in 1998-th position 
+        #string = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+    
+        #string = "meow"
+        # Discord allows maximally 2000 characters. Encoding in that case was UTF-8!  
+        # If Discord codign monkeys change it to ASCII, then the BUG is possible here!
+        # However, to prevent some possible bugs and errors in development of this script 
+        # I reduced it by two. Meow meow. :cat:
+        BUFFER_LENGTH = 1998
+        
+        # Main index! 
+        idx = 0
+        string_length = len(string)
+        
+        # Skip the dog
+        if string_length < BUFFER_LENGTH:
+            return [string[idx:]]
+    
+        result = []
+            
+        # Since this is while loop I put here some kind of watchdog 
+        # Note that we don't kick the dog
+        # Message can be 1 998 000 characters long. 
+        meow = 0 
+        while True:
+            if meow > 1000: 
+                # Kova is retard
+                raise RecursionError('Too many meows in one loop!') 
+            meow += 1
+    
+            # Append everything if the buffer is long enough 
+            if string_length - idx < BUFFER_LENGTH:
+                #print("waat")
+                result += [string[idx:]]
+                break
+    
+            # Get the last index of new line character `\n`
+            last_idx = string.rfind('\n', idx, idx + BUFFER_LENGTH)  
+    
+            # Did we found the ending character? 
+            if last_idx == -1 or last_idx == string_length - 1:
+                #print("too")
+                # There is still something to parse => remove buffer 
+                if last_idx - idx +1 < BUFFER_LENGTH:
+                    raise MemoryError(f"Can not print message longer than {BUFFER_LENGTH} characters")
+                result += [string[idx:]]
+                break
+            # Append the substring ended with `\n`
+            result += [string[idx:last_idx + 1]]
+            # Add index
+            idx = last_idx + 1
+            # Repeat
+        # while True ends
+        return result
+    #for i in x:
+    #    x = decompose(string)
+    #    print(len(i), x)
+
+
             
 
 
@@ -296,13 +403,22 @@ class ServerList(defaultdict):
 
 # debugging porposes
 if __name__ == '__main__':
-    DFT = '94.76.229.42'
+    SERVERS = ['217.182.197.183', '94.76.229.42']
     DID = 42
     x = ServerList()
+    print(x.serverList(DID))
+    print(x.getInfoSingleServer(DID, 3)[0])
+    print("---Clearing---")
     print(x.clear(DID))
-    print(x.add(DID, DFT))
-
-    #print(x.getInfo(DID, admin=True))
+    print(x.add(DID, SERVERS[1], 11000))
+    print(x.serverList(DID))
+    print(x.add(DID, SERVERS[1]))
+    print(x.add(DID, SERVERS[0]))
+    print(x.serverList(DID))
+    #print(x.getInfoSingleServer(DID, 2)[0])
+    print(x.getInfo(DID, admin=True))
+    for info, warn in x.getInfo(DID, admin=True):
+        print(len(info), len(warn))
 
 
 
