@@ -12,7 +12,7 @@ Player just type `.dst` and the bot prints down online players. See:
 
 
 ## Setting up Discord
-1. [Invite bot](https://discordapp.com/api/oauth2/authorize?client_id=406057880631115777&permissions=268758112&scope=bot) to your server
+1. Invite bot to your server
 2. You need to create one Discord channel `#admin-dst-info` with permission for that bot.
 3. Type `.dst server add {dst-ip}` in `#admin-dst-info`
 4. You can type `.dst` anywhere channels in order to get the list of online players.
