@@ -19,7 +19,7 @@ import os
 import sys
 
 
-_DISCORD_WEBHOOK_URL_ = "https://discordapp.com/api/webhooks/575624544195444756/wAuKREMkYZZJxvZRJCDnIDWkf1XlPNeDwlzOTPYePjtQKc9cDu1ssX5noK9J4iFk0i4Q"
+_DISCORD_WEBHOOK_URL_ = "put it here"
 
 #_PATH_LATEST_VERSION_FILENAME_ = 'c:\\Program Files (x86)\\Steam\\steamapps\\common\\Don\'t Starve Together\\version.txt'
 _PATH_LATEST_VERSION_FILENAME_ = 'version.txt'
