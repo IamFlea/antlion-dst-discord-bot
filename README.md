@@ -1,3 +1,6 @@
+# For better version, check [Deerclops](https://github.com/IamFlea/Deerclops-Lite)
+
+
 Ladies and gantleman, 
 
 I present you 
